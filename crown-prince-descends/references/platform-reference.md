@@ -4,30 +4,65 @@ Each platform implements subagents differently. The Crown Prince pattern works u
 
 ## Claude Code
 
-### Subagent Definition
-Create a custom subagent file at `.claude/agents/<name>.md`:
+### ⚠️ CRITICAL KNOWN ISSUE: Background agents cannot write files
+
+**Claude Code background Task agents have ALL write permissions auto-denied.** This means:
+- Background agents can READ files, run Bash commands, search — but cannot Write/Edit/Create files
+- Write-capable vassals will silently fail — they appear to complete but produce no output files
+- This is a confirmed bug/limitation tracked in:
+  - https://github.com/anthropics/claude-code/issues/40818
+  - https://github.com/anthropics/claude-code/issues/40751
+  - https://github.com/anthropics/claude-code/issues/40502
+
+### Workarounds (choose one)
+
+**Option A: Use custom subagent definitions (RECOMMENDED)**
+
+Instead of the `Task` tool, define custom subagents in `.claude/agents/` with explicit write tools:
 
 ```markdown
 ---
-description: One-line description of what this agent does
+description: Vassal agent for code generation tasks
 prompt: |
-  You are a vassal agent. Your task is to complete the assigned sub-task efficiently.
-  Return ONLY a concise summary of your findings/results.
-tools: Read Write Edit Bash
-maxTurns: 20
+  You are a vassal agent. Complete the assigned sub-task.
+  Write all output files as specified in the task description.
+tools: Read Write Edit Bash Glob Grep
+maxTurns: 30
+permissionMode: bypassPermissions
 ---
 ```
 
+Spawn with: `Agent(agent_type: "vassal-code", task: "...")`
+
+**⚠️ Security note:** `bypassPermissions` skips all permission checks. Only use in sandboxed/trusted environments.
+
+**Option B: Use inline agents (not background)**
+
+Do NOT use `run_in_background: true` for write-capable tasks. Run vassals inline so the user can approve write permissions interactively. Trade-off: no parallelism for write tasks.
+
+**Option C: Generate code, let Crown Prince write**
+
+Vassals produce code in their text output (not as files). Crown Prince reads the output via TaskOutput, then writes the files itself. Trade-off: defeats context isolation for write tasks.
+
 ### Dispatching
-The Crown Prince (main agent) uses the built-in `Task` tool (background mode):
 
+**For read-only tasks (analysis, review):**
 ```
-Use the Task tool to spawn a background agent:
-- task: <self-contained sub-task description>
-- run_in_background: true
+Use the Task tool with run_in_background: true — parallel execution works fine.
 ```
 
-### Result Collection — IMPORTANT
+**For write-capable tasks (code generation):**
+```
+Use the Agent tool with a custom subagent definition that includes Write/Edit tools,
+OR run inline (not background) if custom subagents are not set up.
+```
+
+### Result Collection
+
+**Do NOT use TaskOutput** to retrieve results — it returns raw JSONL transcripts on Claude Code v2.0.77+. See [this bug report](https://github.com/anthropics/claude-code/issues/17591).
+
+For read-only vassals: instruct them to write summary to `.crown-prince-vassal-{N}.md`
+For write-capable vassals: the created files ARE the output; verify with glob/ls
 
 **Do NOT use `TaskOutput` to retrieve results.** Claude Code v2.0.77+ has a known bug where `TaskOutput` returns raw JSONL conversation transcripts instead of clean summaries. This defeats the purpose of context isolation and can cause the Crown Prince's context to explode.
 

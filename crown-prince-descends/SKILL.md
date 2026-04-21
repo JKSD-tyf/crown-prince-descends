@@ -10,7 +10,7 @@ license: MIT
 compatibility: Works with Claude Code, OpenAI Codex, Cursor, OpenClaw, and any agent supporting
   the Agent Skills specification (agentskills.io). Subagent dispatch mechanism varies by platform.
 metadata:
-  version: "2.2.0"
+  version: "2.2.1"
   author: JKSD-tyf
   category: orchestration
 ---
@@ -140,7 +140,8 @@ If the task **cannot** be split into non-overlapping file scopes:
 
 Spawn vassals using the platform's native subagent mechanism (see [Platform Reference](references/platform-reference.md)):
 
-- **Claude Code:** Use the `Task` tool with `run_in_background: true`
+- **Claude Code (read-only):** Use the `Task` tool with `run_in_background: true`
+- **Claude Code (write-capable):** Use `Agent` tool with custom subagent + `bypassPermissions` (see platform-reference.md)
 - **OpenAI Codex:** Use `mode: subagents` or custom TOML agent in `~/.codex/agents/`
 - **Cursor:** Define subagents in `.cursor/rules/` or use background agent delegation
 - **OpenClaw:** Use `sessions_spawn` with `runtime: "subagent"`
