@@ -1,29 +1,37 @@
 ---
 name: crown-prince-descends
 description: >
-  Multi-agent task dispatcher for OpenClaw. Splits complex tasks into sub-tasks handled by independent
-  subagents (vassals), keeping each agent's context lean to prevent quality degradation on models with long
-  but unreliable context windows (e.g., GLM-5.1). The Crown Prince (main agent) serves as the sovereign
-  commander — it analyzes, plans, dispatches, and synthesizes, never doing heavy lifting itself. Use when:
-  (1) a task involves processing large amounts of content (codebases, long documents, multi-step projects),
-  (2) the user explicitly asks for multi-agent mode, (3) the agent detects that a single-agent approach would
-  exceed safe context limits. Triggers on keywords like "dispatch", "multi-agent", "split task",
-  "crown prince", "储君降临", or when task complexity warrants it.
+  Multi-agent task dispatcher that prevents context overload by splitting complex tasks across
+  isolated subagents. The Crown Prince (main agent) analyzes, plans, dispatches vassals, and
+  synthesizes results — never doing heavy lifting itself. Each vassal gets minimal, relevant
+  context to stay sharp. Essential for models with large but unreliable context windows (e.g.,
+  GLM-5.1, long-context LLMs). Triggers on: (1) tasks involving multiple large files or
+  documents (>5 files or >50k tokens), (2) tasks with 3+ independent sub-steps, (3) user
+  explicitly requests "multi-agent", "dispatch", "crown prince", "储君降临", or (4) any task
+  where single-agent execution risks context overload.
+license: MIT
+compatibility: Works with Claude Code, OpenAI Codex, Cursor, OpenClaw, and any agent supporting
+  the Agent Skills specification (agentskills.io). Subagent dispatch mechanism varies by platform.
+metadata:
+  version: "1.1.0"
+  author: JKSD-tyf
+  category: orchestration
 ---
 
 # Crown Prince Descends
 
-A multi-agent dispatch pattern. The Crown Prince commands; the Vassals execute. Every agent stays smart because context stays lean.
+Multi-agent dispatch pattern. The Crown Prince commands; the Vassals execute. Every agent stays sharp because context stays lean.
 
 ## Core Philosophy
 
-- **Crown Prince (Main Agent)** — The sovereign commander. Analyzes, plans, dispatches tasks to vassals, and synthesizes results. Never does heavy lifting.
-- **Vassals (Subagents)** — The executors. Each handles a focused sub-task with minimal, relevant context. They serve the Crown Prince.
+- **Crown Prince (Main Agent)** — Sovereign commander. Analyzes, plans, dispatches vassals, synthesizes results. Never does heavy lifting.
+- **Vassals (Subagents)** — Executors. Each handles a focused sub-task with minimal, relevant context. They serve the Crown Prince.
 - **Context budget > big context window** — A well-curated 100k context consistently outperforms a noisy 200k one.
 
 ## When to Activate
 
 ### Automatic Detection
+
 Ask the user before activating when ANY of these signals are present:
 - Task requires reading/processing multiple large files (>5 files or >50k tokens total)
 - Task has 3+ independent or semi-independent sub-steps
@@ -31,12 +39,14 @@ Ask the user before activating when ANY of these signals are present:
 - Single-agent execution would risk context overload
 
 ### User-Initiated
+
 Activate immediately when the user says:
 - "multi-agent mode" / "dispatch" / "split task"
 - "crown prince" / "储君降临"
 - Or explicitly requests task splitting
 
 ### Ask the User
+
 Present a brief proposal before activating:
 ```
 This task is complex. Recommend enabling multi-agent mode:
@@ -61,35 +71,44 @@ Enable?
 
 ### Step 2: Dispatch
 
-Use `sessions_spawn` with `runtime: "subagent"` for each sub-task:
-- `mode: "run"` for one-shot sub-tasks
-- `task`: Clear, self-contained description with all necessary context
-- Do NOT include the full conversation history — only what the vassal needs
+Spawn vassals using the platform's native subagent mechanism (see [Platform Reference](references/platform-reference.md)):
+
+- **Claude Code:** Use the `Agent` tool or `--agent` flag with a custom subagent definition
+- **OpenAI Codex:** Use `mode: subagents` or custom TOML agent in `~/.codex/agents/`
+- **Cursor:** Define subagents in `.cursor/rules/` or use background agent delegation
+- **OpenClaw:** Use `sessions_spawn` with `runtime: "subagent"`
+
+For each vassal:
+- Provide a clear, self-contained task description with all necessary context
+- Do NOT include conversation history — only what the vassal needs
 - Set explicit output format expectations in the task description
 
 ### Step 3: Collect & Synthesize
 
-1. Wait for all vassals to complete (completion is push-based)
+1. Wait for all vassals to complete
 2. For each result:
    - Extract key conclusions only
    - Discard intermediate reasoning/process details
 3. Synthesize final answer for the user
-4. If results conflict or need reconciliation, spawn a new focused vassal for resolution
+4. If results conflict or need reconciliation, spawn a new focused vassal
 
 ## Context Budget Rules
 
 ### Vassal Context Limits
+
 Each vassal's task description should follow:
-- **Task prompt**: max ~2000 words — describe the goal, inputs, and expected output
-- **File content**: only include directly relevant files, truncate if needed
-- **No conversation history**: vassals start fresh; include state as structured data if needed
+- **Task prompt:** max ~2000 words — describe the goal, inputs, and expected output
+- **File content:** only include directly relevant files, truncate if needed
+- **No conversation history:** vassals start fresh; include state as structured data if needed
 
 ### Crown Prince Context Protection
+
 - Never forward raw vassal output directly into conversation — summarize first
 - After synthesis, compress earlier task planning context if the conversation grows long
 - Keep a running mental model: "Task → N vassals → key results → synthesis"
 
 ### Result Compression Pattern
+
 When a vassal returns results, immediately compress:
 ```
 Raw output (potentially 2000+ words)
@@ -107,20 +126,15 @@ Raw output (potentially 2000+ words)
 
 **Hard limit: 5 vassals.** More adds coordination overhead that exceeds parallelism gains.
 
-## Failure Handling
-
-- If a vassal fails or times out, retry once with a simplified task
-- If it fails again, fall back to Crown Prince handling that sub-task directly
-- If 2+ vassals fail, abort multi-agent mode and warn the user
-- Always inform the user about failures — transparency > perfection
-
 ## Checkpoint & Continuity
 
-The Crown Prince's context will grow during a long dispatch session. When it approaches the safe limit, persist state to disk so a fresh session can continue without losing progress.
+The Crown Prince's context grows during long sessions. Persist state to disk so a fresh session can continue without losing progress.
 
 ### When to Checkpoint
 
-After every dispatch round (all vassals returned + synthesis done), write a checkpoint file to `memory/crown-prince-checkpoint.md`:
+After every dispatch round (all vassals returned + synthesis done), write a checkpoint:
+
+**Path:** `.crown-prince-checkpoint.md` (project root) or platform equivalent
 
 ```markdown
 # Crown Prince Checkpoint
@@ -147,33 +161,35 @@ After every dispatch round (all vassals returned + synthesis done), write a chec
 
 ### Context Budget Alert
 
-Monitor context growth informally. If the conversation has accumulated:
-- 3+ dispatch rounds, OR
-- Multiple long vassal outputs that couldn't be fully compressed
-
-Then after the current round, inform the user:
+If the conversation has accumulated 3+ dispatch rounds or multiple long vassal outputs:
 
 ```
-储君的精力快用完了（上下文接近安全上限）。
-当前进度已保存到 checkpoint。
-建议新开一个 session，我会自动读取 checkpoint 继续工作。
+Crown Prince context approaching safe limits. Progress saved to checkpoint.
+Recommend starting a new session — the next session will auto-detect and resume.
 ```
 
 ### Session Handoff
 
-When a new session starts and detects an existing checkpoint (`memory/crown-prince-checkpoint.md`):
+When a new session starts and detects an existing checkpoint:
 1. Read the checkpoint
-2. Brief the user: "检测到未完成的储君任务，是否继续？"
-3. If yes, resume from where it left off using the checkpoint state — do NOT replay old conversation
+2. Brief the user: "Detected an unfinished Crown Prince task. Resume?"
+3. If yes, resume from the checkpoint — do NOT replay old conversation
 4. Update the checkpoint after each new round
-5. On task completion, delete the checkpoint file
+5. On task completion, delete the checkpoint
 
 ### Checkpoint Rules
 
-- Keep it under 500 words — it must be lean enough to safely load into a fresh session
+- Keep under 500 words — lean enough to safely load into a fresh session
 - One active checkpoint at a time — overwrite, never append
-- Delete checkpoint only after task completion or explicit user cancellation
+- Delete only after task completion or explicit user cancellation
 - If checkpoint is >24h old, ask user before resuming (requirements may have changed)
+
+## Failure Handling
+
+- If a vassal fails or times out, retry once with a simplified task
+- If it fails again, fall back to Crown Prince handling that sub-task directly
+- If 2+ vassals fail, abort multi-agent mode and warn the user
+- Always inform the user about failures — transparency > perfection
 
 ## Anti-Patterns to Avoid
 
