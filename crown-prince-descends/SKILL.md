@@ -10,7 +10,7 @@ license: MIT
 compatibility: Works with Claude Code, OpenAI Codex, Cursor, OpenClaw, and any agent supporting
   the Agent Skills specification (agentskills.io). Subagent dispatch mechanism varies by platform.
 metadata:
-  version: "2.1.0"
+  version: "2.2.0"
   author: JKSD-tyf
   category: orchestration
 ---
@@ -153,36 +153,59 @@ For each vassal:
 
 **IMPORTANT — Vassal Output Contract (ALL platforms):**
 
-Instruct every vassal to write its final result to a designated output file. This avoids the TaskOutput JSONL bug in Claude Code and ensures clean result collection on all platforms.
+For **read-only tasks** (analysis, review, research):
 
-Vassal task description MUST include:
+Vassals MUST write a summary file. Place this instruction at the **top** of every vassal's task description:
 ```
-OUTPUT INSTRUCTIONS:
-Write your final result to: .crown-prince-vassal-{N}.md
-Format: Markdown with clear sections
-Length: Keep under 500 words — concise bullet points only
-Content: Key findings and actionable recommendations only
-Do NOT include intermediate reasoning or raw data
+MANDATORY FIRST STEP: Write your final summary to .crown-prince-vassal-{N}.md BEFORE doing anything else.
+Keep it under 500 words. Bullet points only. Key findings and recommendations.
+Update this file as you work. The Crown Prince reads this file to collect your results.
 ```
 
-The Crown Prince reads `.crown-prince-vassal-1.md`, `.crown-prince-vassal-2.md`, etc. to collect results.
+For **write-capable tasks** (creating/modifying code):
 
-**Do NOT use TaskOutput or similar return-value tools** — they return raw JSONL transcripts on some platforms, defeating the purpose of context isolation.
+Vassals write code directly — no separate summary file needed. The **created files ARE the output**. Instead, the vassal's task description must include:
+```
+OUTPUT: Create the following files:
+- <file path 1>
+- <file path 2>
+- <file path 3>
+After creating all files, write a brief completion note to .crown-prince-vassal-{N}.md listing:
+1. Files created
+2. Dependencies required (npm packages, etc.)
+3. Any integration notes for the Crown Prince
+```
+
+**File collection strategy:**
+
+| Task Type | How Crown Prince Collects Results |
+|---|---|
+| Read-only | Read `.crown-prince-vassal-{N}.md` summary files |
+| Write-capable | Verify created files exist + read `.crown-prince-vassal-{N}.md` for notes |
+
+**Why separate strategies?** Read-only tasks produce text conclusions that need a file. Write-capable tasks produce code files directly — forcing a separate summary is redundant and often gets skipped by vassals.
+
+**Do NOT use TaskOutput as the primary collection method** — it returns raw JSONL transcripts on Claude Code, defeating context isolation. Use TaskOutput only as a fallback (see Failure Handling).
 
 ### Step 3: Collect & Synthesize (Crown Prince only — no new analysis)
 
 1. Wait for all vassals to complete (check status, do not poll in a loop)
-2. Read each vassal's output file: `.crown-prince-vassal-{N}.md`
-3. For each result:
-   - Extract key conclusions only
-   - Discard intermediate reasoning/process details
-4. Synthesize final answer for the user
-5. Clean up: delete all `.crown-prince-vassal-*.md` files after synthesis
-6. If results conflict or need reconciliation, spawn a new focused vassal
+2. **For read-only tasks:** Read `.crown-prince-vassal-{N}.md` summary files
+3. **For write-capable tasks:**
+   - Verify that expected files were created (glob/ls the target directories)
+   - Read `.crown-prince-vassal-{N}.md` for dependency and integration notes
+   - If expected files exist → vassal succeeded, proceed to integration
+   - If expected files are missing → see Failure Handling
+4. For read-only: extract key conclusions, discard intermediate reasoning
+5. For write-capable: handle shared integration (mount routes, update imports, install deps)
+6. Clean up: delete all `.crown-prince-vassal-*.md` files after synthesis
+7. If results conflict or need reconciliation, spawn a new focused vassal
 
 **CRITICAL: The Crown Prince does NOT redo the vassals' work. It only summarizes and integrates.**
 
-**Do NOT resume or re-launch completed vassals** — if the output file is empty or missing, retry with a simplified task (see Failure Handling).
+**Do NOT assume vassal failure just because .crown-prince-vassal-*.md is missing** — for write-capable tasks, check if the actual code files were created. If they were, the vassal succeeded even without a summary note.
+
+**Do NOT resume or re-launch completed vassals** — verify file existence first.
 
 ---
 
@@ -290,6 +313,15 @@ When a new session starts and detects an existing checkpoint:
 - If it fails again, fall back to Crown Prince handling that sub-task directly
 - If 2+ vassals fail, abort multi-agent mode and warn the user
 - Always inform the user about failures — transparency > perfection
+
+### Vassal "No Output" Troubleshooting
+
+If `.crown-prince-vassal-{N}.md` is missing after a vassal reports completion:
+
+1. **Write-capable task?** → Check if the actual code files were created. If yes, vassal succeeded — skip the summary.
+2. **Read-only task?** → Try reading TaskOutput as fallback (accept the noise). If empty/invalid, retry the vassal.
+3. **Still nothing?** → Retry once with an explicit "you MUST write to .crown-prince-vassal-{N}.md" instruction.
+4. **Still nothing after retry?** → Vassal genuinely failed. Fall back to Crown Prince handling.
 
 ---
 
