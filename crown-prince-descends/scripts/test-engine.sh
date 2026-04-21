@@ -19,9 +19,9 @@ fail() { FAIL=$((FAIL+1)); echo -e "  ${RED}✗ FAIL${NC}: $1"; if [[ -n "${2:-}
 section() { echo -e "\n${CYAN}━━ $1 ━━${NC}"; }
 run() {
     echo -e "  ${YELLOW}\$ $*${NC}"
-    OUTPUT=$(eval "$@" 2>&1)
+    OUTPUT=$("$@" 2>&1)
     local rc=$?
-    STDERR="$OUTPUT"  # engine outputs to stderr for colored messages
+    STDERR="$OUTPUT"
     return $rc
 }
 phase_is() {
