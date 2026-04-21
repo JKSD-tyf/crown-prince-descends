@@ -19,21 +19,32 @@ maxTurns: 20
 ```
 
 ### Dispatching
-The Crown Prince (main agent) uses the built-in `Agent` tool:
+The Crown Prince (main agent) uses the built-in `Task` tool (background mode):
 
 ```
-Use the Agent tool to spawn a subagent:
-- Agent type: <name from .claude/agents/>
-- Task: <self-contained sub-task description>
+Use the Task tool to spawn a background agent:
+- task: <self-contained sub-task description>
+- run_in_background: true
 ```
 
-Alternatively, use `claude --agent <name> -p "<task>"` for one-shot dispatch from CLI.
+### Result Collection — IMPORTANT
+
+**Do NOT use `TaskOutput` to retrieve results.** Claude Code v2.0.77+ has a known bug where `TaskOutput` returns raw JSONL conversation transcripts instead of clean summaries. This defeats the purpose of context isolation and can cause the Crown Prince's context to explode.
+
+**Instead, instruct each vassal to write results to a file:**
+```
+OUTPUT INSTRUCTIONS:
+Write your final result to: .crown-prince-vassal-{N}.md
+Format: Markdown, keep under 500 words, bullet points only.
+```
+
+The Crown Prince reads `.crown-prince-vassal-{N}.md` files after vassals complete.
 
 ### Key Details
 - Subagents run in separate context windows
-- Results return to main session as summaries
 - Configure which tools each subagent can access via `tools` field
 - Use `maxTurns` to prevent runaway agents
+- Clean up vassal output files after synthesis
 
 ---
 

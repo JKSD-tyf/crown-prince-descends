@@ -13,7 +13,7 @@ license: MIT
 compatibility: Works with Claude Code, OpenAI Codex, Cursor, OpenClaw, and any agent supporting
   the Agent Skills specification (agentskills.io). Subagent dispatch mechanism varies by platform.
 metadata:
-  version: "1.2.0"
+  version: "1.2.1"
   author: JKSD-tyf
   category: orchestration
 ---
@@ -120,16 +120,38 @@ For each vassal:
 - Set explicit output format expectations in the task description
 - If real files exist, include relevant file content; if files are hypothetical, explicitly state the assumed tech stack and patterns
 
+**IMPORTANT — Vassal Output Contract (ALL platforms):**
+
+Instruct every vassal to write its final result to a designated output file instead of relying on return values. This avoids the TaskOutput JSONL bug in Claude Code and ensures clean result collection on all platforms.
+
+Vassal task description MUST include:
+```
+OUTPUT INSTRUCTIONS:
+Write your final result to: .crown-prince-vassal-{N}.md
+Format: Markdown with clear sections
+Length: Keep under 500 words — concise bullet points only
+Content: Key findings and actionable recommendations only
+Do NOT include intermediate reasoning or raw data
+```
+
+The Crown Prince reads `.crown-prince-vassal-1.md`, `.crown-prince-vassal-2.md`, etc. to collect results.
+
+**Do NOT use TaskOutput or similar return-value tools** — they return raw JSONL transcripts on some platforms, defeating the purpose of context isolation.
+
 ### Step 3: Collect & Synthesize (Crown Prince only — no new analysis)
 
-1. Wait for all vassals to complete
-2. For each result:
+1. Wait for all vassals to complete (check status, do not poll in a loop)
+2. Read each vassal's output file: `.crown-prince-vassal-{N}.md`
+3. For each result:
    - Extract key conclusions only
    - Discard intermediate reasoning/process details
-3. Synthesize final answer for the user
-4. If results conflict or need reconciliation, spawn a new focused vassal
+4. Synthesize final answer for the user
+5. Clean up: delete all `.crown-prince-vassal-*.md` files after synthesis
+6. If results conflict or need reconciliation, spawn a new focused vassal
 
-**CRITICAL:** The Crown Prince does NOT redo the vassals' work. It only summarizes and integrates.
+**CRITICAL: The Crown Prince does NOT redo the vassals' work. It only summarizes and integrates.**
+
+**Do NOT resume or re-launch completed vassals** — if the output file is empty or missing, retry with a simplified task (see Failure Handling).
 
 ---
 
