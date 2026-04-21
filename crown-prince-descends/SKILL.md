@@ -10,7 +10,7 @@ license: MIT
 compatibility: Works with Claude Code, OpenAI Codex, Cursor, OpenClaw, and any agent supporting
   the Agent Skills specification (agentskills.io). Subagent dispatch mechanism varies by platform.
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
   author: JKSD-tyf
   category: orchestration
 ---
@@ -51,37 +51,90 @@ Activate **immediately** (no confirmation needed) when the user says any of:
 
 ---
 
-## Dispatch Workflow
+## Task Type Detection
 
-### Step 1: Analyze & Plan (Crown Prince only — no vassals yet)
+Before planning, determine if the task is **read-only** or **write-capable**:
 
-1. Break the task into sub-tasks. Each sub-task should:
-   - Be independently completable
-   - Require its own bounded set of files/context
-   - Have a clear, concise output format
-2. Determine concurrency level:
-   - **Simple tasks (2 vassals):** linear or loosely coupled sub-tasks
-   - **Complex tasks (3-5 vassals):** highly parallelizable, multiple domains
-3. Present the proposal to the user:
+| Type | Examples | Dispatch Mode |
+|---|---|---|
+| **Read-only** | Code review, analysis, audit, research, documentation | Parallel (safe — no file conflicts) |
+| **Write-capable** | Writing code, refactoring, adding features, fixing bugs | Conflict-aware (see File Isolation rules below) |
+
+A task is write-capable if any vassal will create, modify, or delete files.
+
+---
+
+## File Isolation (Write-Capable Tasks)
+
+**This is critical.** When vassals write code, they must never touch the same files — the last writer wins and earlier work is silently lost.
+
+### Rules
+
+1. **Each vassal must have exclusive file ownership** — no two vassals may write to the same file
+2. **If two sub-tasks require modifying the same file → merge them into one vassal**
+3. **Shared integration points** (e.g., a central `routes.js` or `index.ts`) must be handled by the Crown Prince after all vassals complete — never delegated
+4. **Vassals create new files in isolated scopes** (e.g., `src/auth/`, `src/payment/`) — they do NOT modify existing shared files
+
+### Planning Checklist (for write-capable tasks)
+
+For each vassal, declare:
+- Files to **create** (new files, zero conflict)
+- Files to **modify** (must not overlap with other vassals)
+- Files that **must not be touched** (shared files reserved for Crown Prince)
+
+### Dispatch Proposal (Write-Capable)
 
 ```
 📋 Crown Prince Dispatch Proposal
 
 Task: <brief task summary>
-Complexity: <simple / medium / complex>
+Type: Write-capable (conflict-aware)
 
 Proposed split:
-- V1: <sub-task 1 description>
-- V2: <sub-task 2 description>
-- V3: <sub-task 3 description> (if needed)
+- V1: <sub-task>
+  - Creates: auth.js, authMiddleware.js, auth.test.js
+  - Modifies: (none)
+- V2: <sub-task>
+  - Creates: payment.js, paymentService.js, payment.test.js
+  - Modifies: (none)
+- V3: <sub-task>
+  - Creates: admin.js, adminRoutes.js
+  - Modifies: (none)
 
-Each vassal works independently with lean context.
-Crown Prince synthesizes all results into a final report.
+Crown Prince handles after all vassals complete:
+- Integrate into routes.js (shared file)
+- Update server.js imports
+- Run integration check
 
+Execution: V1, V2, V3 in parallel (no file overlap)
 Enable? (yes/no)
 ```
 
-4. **WAIT for user confirmation**
+### Sequential Fallback
+
+If the task **cannot** be split into non-overlapping file scopes:
+- Run vassals **sequentially** — each vassal sees the previous vassal's output files
+- Explicitly chain: V1 completes → V2 starts with V1's results as context → V3 starts with V2's results
+- Accept slower execution to guarantee correctness
+
+---
+
+## Dispatch Workflow
+
+### Step 1: Analyze & Plan (Crown Prince only — no vassals yet)
+
+1. **Determine task type** (read-only vs write-capable)
+2. Break the task into sub-tasks. Each sub-task should:
+   - Be independently completable
+   - Require its own bounded set of files/context
+   - Have a clear, concise output format
+3. **For write-capable tasks:** Map file ownership, check for conflicts, resolve overlaps
+4. Determine execution mode:
+   - **Read-only:** Parallel (up to 5 vassals)
+   - **Write-capable, no conflicts:** Parallel (up to 5 vassals)
+   - **Write-capable, has conflicts:** Sequential or merged vassals
+5. Present the proposal to the user (use the appropriate template above)
+6. **WAIT for user confirmation**
 
 ### Step 2: Dispatch (after user confirms)
 
@@ -243,9 +296,10 @@ When a new session starts and detects an existing checkpoint:
 ## Anti-Patterns to Avoid
 
 - **Don't auto-activate** — this skill ONLY activates on explicit user summon
+- **Don't let vassals write to overlapping files** — last writer wins = silent data loss
+- **Don't delegate shared integration files** — Crown Prince handles routes.js, index.ts, etc.
 - **Don't give vassals full conversation history** — they don't need it
 - **Don't spawn vassals for vassals** — max 1 level of dispatch depth
 - **Don't forward raw outputs** — always compress before presenting
-- **Don't split tightly coupled tasks** — if sub-task B depends on sub-task A's output, consider combining them
 - **Don't skip checkpointing on long tasks** — if you've done 2+ rounds, checkpoint before it's too late
 - **Don't mention this skill unprompted** — the user will summon when needed
