@@ -20,8 +20,8 @@ Many modern LLMs claim massive context windows (128k, 200k...), but stuffing the
 
 **Crown Prince Descends** implements a Sovereign-Prince architecture:
 
-- **Sovereign (Main Agent)** — The manager. Splits tasks, dispatches subagents, synthesizes results. Never does heavy lifting.
-- **Crown Princes (Subagents)** — The workers. Each handles a focused sub-task with minimal, relevant context. They descend into the battlefield.
+- **Crown Prince (Main Agent)** — The sovereign commander. Analyzes, plans, dispatches vassals, synthesizes results. Never does heavy lifting.
+- **Vassals (Subagents)** — The executors. Each handles a focused sub-task with minimal, relevant context. They serve the Crown Prince.
 
 ### How It Works
 
@@ -30,12 +30,13 @@ User Request (complex task)
         │
         ▼
   ┌──────────┐
-  │ Sovereign │ ─── Analyze, Plan, Split
+  │   Crown  │
+  │  Prince  │ ─── Analyze, Plan, Split
   └────┬─────┘
        │
    ┌───┼───┐
    ▼   ▼   ▼
-  P1  P2  P3   ← Crown Princes (subagents)
+  V1  V2  V3   ← Vassals (subagents)
   (2-5 agents, task-dependent)
    │   │   │
    ▼   ▼   ▼
@@ -43,7 +44,8 @@ User Request (complex task)
        │
        ▼
   ┌──────────┐
-  │ Sovereign │ ─── Synthesize final answer
+  │   Crown  │
+  │  Prince  │ ─── Synthesize final answer
   └──────────┘
        │
        ▼
@@ -95,8 +97,8 @@ The skill activates automatically when the agent detects a complex task, or when
 
 **储君降临**实现君王-储君架构：
 
-- **君王（主 Agent）** — 调度员。拆分任务、派发 subagent、汇总结果。不干脏活。
-- **储君（Subagent）** — 执行者。每个只处理自己的子任务，上下文最小化、最相关。降临战场干活。
+- **Crown Prince (Main Agent)** — 调度员。拆分任务、派发仆从、汇总结果。不干脏活。
+- **仆从 (Subagent)** — 执行者。每个只处理自己的子任务，上下文最小化、最相关。听命于储君。
 
 ### 工作流程
 
@@ -105,19 +107,19 @@ The skill activates automatically when the agent detects a complex task, or when
         │
         ▼
   ┌──────────┐
-  │  君 王   │ ─── 分析、规划、拆分
+  │   储 君   │ ─── 分析、规划、拆分
   └────┬─────┘
        │
    ┌───┼───┐
    ▼   ▼   ▼
-  储君1 储君2 储君3  ← subagents（2-5个，视任务而定）
+  仆从1 仆从2 仆从3  ← subagents（2-5个，视任务而定）
    │   │   │
    ▼   ▼   ▼
   结果压缩 & 总结
        │
        ▼
   ┌──────────┐
-  │  君 王   │ ─── 汇总最终答案
+  │   储 君   │ ─── 汇总最终答案
   └──────────┘
        │
        ▼
@@ -169,8 +171,8 @@ Skill 会在检测到复杂任务时自动激活，也可以手动触发：
 
 **皇太子降臨**は「君主・皇太子」アーキテクチャを実装します：
 
-- **君主（メインエージェント）** — マネージャー。タスクを分割し、サブエージェントを派遣し、結果を統合します。重い作業はしません。
-- **皇太子（サブエージェント）** — 実行者。それぞれが最小限の関連コンテキストでフォーカスされたサブタスクを処理します。戦場に降臨します。
+- **皇太子（メインエージェント）** — 統率者。タスクを分割し、従者を派遣し、結果を統合します。重い作業はしません。
+- **従者（サブエージェント）** — 実行者。それぞれが最小限の関連コンテキストでフォーカスされたサブタスクを処理します。皇太子に仕えます。
 
 ### 動作フロー
 
@@ -179,19 +181,19 @@ Skill 会在检测到复杂任务时自动激活，也可以手动触发：
         │
         ▼
   ┌──────────┐
-  │  君 主   │ ─── 分析・計画・分割
+  │  皇 太 子  │ ─── 分析・計画・分割
   └────┬─────┘
        │
    ┌───┼───┐
    ▼   ▼   ▼
-  皇太子1 皇太子2 皇太子3  ← サブエージェント（2-5個、タスク依存）
+  従者1 従者2 従者3  ← サブエージェント（2-5個、タスク依存）
    │   │   │
    ▼   ▼   ▼
   結果を圧縮・要約
        │
        ▼
   ┌──────────┐
-  │  君 主   │ ─── 最終回答を統合
+  │  皇 太 子  │ ─── 最終回答を統合
   └──────────┘
        │
        ▼
