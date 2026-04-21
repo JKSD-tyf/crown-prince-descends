@@ -26,7 +26,9 @@ run() {
 }
 phase_is() {
     local actual
-    actual=$(python3 -c "import json; print(json.load(open('.crown-prince/$1/state.json'))['phase'])" 2>/dev/null)
+    local py
+    py=$(command -v python3 2>/dev/null || command -v python 2>/dev/null)
+    actual=$($py -c "import json; print(json.load(open('.crown-prince/$1/state.json'))['phase'])" 2>/dev/null)
     if [[ "$actual" == "$2" ]]; then pass "phase = $2"; else fail "expected phase=$2, got phase=$actual"; fi
 }
 output_contains() {

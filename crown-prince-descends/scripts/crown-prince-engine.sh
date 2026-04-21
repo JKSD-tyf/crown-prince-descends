@@ -5,6 +5,15 @@
 
 set -euo pipefail
 
+# Python command detection (Windows: python, Linux/macOS: python3)
+if command -v python3 &>/dev/null; then
+    PYTHON="python3"
+elif command -v python &>/dev/null; then
+    PYTHON="python"
+else
+    echo "[CP] ERROR: python3 or python not found" >&2; exit 1
+fi
+
 CP_VERSION="3.0.0"
 CP_DIR=".crown-prince"
 STATE_FILE="state.json"
@@ -24,7 +33,7 @@ require_git() { git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not 
 
 # Use heredoc for all python to avoid quoting issues
 _get_phase() {
-    python3 - "$1" <<'PY'
+    $PYTHON - "$1" <<'PY'
 import json, sys
 with open(f"{sys.argv[1]}/state.json") as f: print(json.load(f).get("phase","init"))
 PY
@@ -33,7 +42,7 @@ PY
 _set_phase() {
     local dir="$1" phase="$2" ts
     ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    python3 - "$dir" "$phase" "$ts" <<'PY'
+    $PYTHON - "$dir" "$phase" "$ts" <<'PY'
 import json, sys
 p = f"{sys.argv[1]}/state.json"
 with open(p) as f: s = json.load(f)
@@ -44,7 +53,7 @@ PY
 }
 
 _get_config() {
-    python3 - "$CP_DIR/$CONFIG_FILE" <<'PY'
+    $PYTHON - "$CP_DIR/$CONFIG_FILE" <<'PY'
 import json, sys
 try:
     with open(sys.argv[1]) as f: print(json.dumps(json.load(f)))
@@ -82,7 +91,7 @@ cmd_init() {
     [[ -d "$dir" ]] && die "Task '$task_id' already exists"
     mkdir -p "$dir/checkpoints" "$CP_DIR/$RETRO_DIR"
 
-    python3 - "$dir" "$task_id" "$task_desc" "$CP_VERSION" <<'PY'
+    $PYTHON - "$dir" "$task_id" "$task_desc" "$CP_VERSION" <<'PY'
 import json, sys, subprocess
 dir, tid, desc, ver = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 sha = subprocess.check_output(["git","rev-parse","HEAD"], text=True).strip()
@@ -108,7 +117,7 @@ cmd_status() {
         local found=0
         for d in "$CP_DIR"/*/; do
             [[ -f "$d/$STATE_FILE" ]] || continue
-            python3 - "$d" <<'PY'
+            $PYTHON - "$d" <<'PY'
 import json, sys
 with open(f"{sys.argv[1]}/state.json") as f:
     s = json.load(f)
@@ -122,7 +131,7 @@ PY
 
     local dir="$CP_DIR/$task_id"
     [[ ! -f "$dir/$STATE_FILE" ]] && die "Task '$task_id' not found"
-    python3 - "$dir" <<'PY'
+    $PYTHON - "$dir" <<'PY'
 import json, sys
 with open(f"{sys.argv[1]}/state.json") as f: s = json.load(f)
 print(f"Task:        {s['task_id']}")
@@ -148,7 +157,7 @@ cmd_dispatch() {
     phase=$(_get_phase "$dir")
     [[ "$phase" != "dispatching" ]] && die "PHASE_BLOCKED: need 'dispatching', got '$phase'"
 
-    python3 - "$dir" "$vassal_id" "$vassal_task" "$task_type" <<'PY'
+    $PYTHON - "$dir" "$vassal_id" "$vassal_task" "$task_type" <<'PY'
 import json, sys, subprocess
 dir, vid, task, ttype = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 ts = subprocess.check_output(["date","-u","+%Y-%m-%dT%H:%M:%SZ"], text=True).strip()
@@ -176,7 +185,7 @@ cmd_collect() {
     # Build file list JSON
     local files_json="[]"
     if [[ $# -gt 0 ]]; then
-        printf '%s\n' "$@" | python3 -c "
+        printf '%s\n' "$@" | $PYTHON -c "
 import sys, json
 print(json.dumps([l.strip() for l in sys.stdin]))
 " > /tmp/cp-files.json
@@ -184,7 +193,7 @@ print(json.dumps([l.strip() for l in sys.stdin]))
         rm -f /tmp/cp-files.json
     fi
 
-    python3 - "$dir" "$vassal_id" "$files_json" <<'PY'
+    $PYTHON - "$dir" "$vassal_id" "$files_json" <<'PY'
 import json, sys, subprocess
 dir, vid, files = sys.argv[1], sys.argv[2], sys.argv[3]
 ts = subprocess.check_output(["date","-u","+%Y-%m-%dT%H:%M:%SZ"], text=True).strip()
@@ -203,7 +212,7 @@ PY
 
 cmd_verify() {
     local dir="$CP_DIR/${1:?}"
-    python3 - "$dir" <<'PY'
+    $PYTHON - "$dir" <<'PY'
 import json, os, sys
 with open(f"{sys.argv[1]}/state.json") as f: s = json.load(f)
 issues = []
@@ -239,7 +248,7 @@ cmd_pass_gate() {
             ;;
         collecting)
             local n
-            n=$(python3 - "$dir" <<'PY'
+            n=$($PYTHON - "$dir" <<'PY'
 import json, sys
 with open(f"{sys.argv[1]}/state.json") as f: print(len(json.load(f).get("vassals",{})))
 PY
@@ -248,7 +257,7 @@ PY
             ;;
         synthesizing)
             local done_val
-            done_val=$(python3 - "$dir" <<'PY'
+            done_val=$($PYTHON - "$dir" <<'PY'
 import json, sys
 with open(f"{sys.argv[1]}/state.json") as f: print(json.load(f).get("all_vassals_completed",False))
 PY
@@ -273,7 +282,7 @@ cmd_retro() {
     local retro_dir="$CP_DIR/$RETRO_DIR"
     mkdir -p "$retro_dir"
 
-    python3 - "$dir" "$retro_dir" <<'PY'
+    $PYTHON - "$dir" "$retro_dir" <<'PY'
 import json, sys, subprocess
 dir, rdir = sys.argv[1], sys.argv[2]
 with open(f"{dir}/state.json") as f: s = json.load(f)
@@ -298,7 +307,7 @@ cmd_abort() {
     local dir="$CP_DIR/${1:?}"
     [[ ! -f "$dir/$STATE_FILE" ]] && die "Task not found"
     local baseline
-    baseline=$(python3 - "$dir" <<'PY'
+    baseline=$($PYTHON - "$dir" <<'PY'
 import json, sys
 with open(f"{sys.argv[1]}/state.json") as f: print(json.load(f).get("git_baseline_sha",""))
 PY
@@ -334,7 +343,7 @@ cmd_config() {
         write)
             local key="${2:?}" value="${3:?}"
             mkdir -p "$CP_DIR"
-            python3 - "$CP_DIR/$CONFIG_FILE" "$key" "$value" <<'PY'
+            $PYTHON - "$CP_DIR/$CONFIG_FILE" "$key" "$value" <<'PY'
 import json, sys
 p, key, val = sys.argv[1], sys.argv[2], sys.argv[3]
 c = {}
