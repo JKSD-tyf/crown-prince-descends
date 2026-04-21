@@ -13,7 +13,7 @@ license: MIT
 compatibility: Works with Claude Code, OpenAI Codex, Cursor, OpenClaw, and any agent supporting
   the Agent Skills specification (agentskills.io). Subagent dispatch mechanism varies by platform.
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
   author: JKSD-tyf
   category: orchestration
 ---
@@ -22,44 +22,78 @@ metadata:
 
 Multi-agent dispatch pattern. The Crown Prince commands; the Vassals execute. Every agent stays sharp because context stays lean.
 
+---
+
+## ⚠️ MANDATORY DECISION GATE — READ FIRST
+
+**This is the most important rule in this skill. Violation of this rule is the #1 failure mode.**
+
+Before starting ANY work on a task that matches the complexity signals below, you MUST:
+
+1. **STOP** — do not read files, do not analyze, do not implement, do not begin any work
+2. **Present a dispatch proposal** to the user (show how you would split the task)
+3. **WAIT** for explicit user confirmation ("yes", "enable", "go ahead", etc.)
+4. **ONLY THEN** proceed with dispatch
+
+If you catch yourself working on a complex sub-task directly, **STOP immediately** and re-route it to a vassal. The Crown Prince plans and synthesizes — it never executes.
+
+---
+
 ## Core Philosophy
 
-- **Crown Prince (Main Agent)** — Sovereign commander. Analyzes, plans, dispatches vassals, synthesizes results. Never does heavy lifting.
+- **Crown Prince (Main Agent)** — Sovereign commander. Analyzes, plans, dispatches vassals, synthesizes results. **Never does heavy lifting.**
 - **Vassals (Subagents)** — Executors. Each handles a focused sub-task with minimal, relevant context. They serve the Crown Prince.
 - **Context budget > big context window** — A well-curated 100k context consistently outperforms a noisy 200k one.
 
 ## When to Activate
 
-### Automatic Detection
+### Automatic Detection — MANDATORY
 
-Ask the user before activating when ANY of these signals are present:
-- Task requires reading/processing multiple large files (>5 files or >50k tokens total)
-- Task has 3+ independent or semi-independent sub-steps
-- User provides a large codebase or document and asks for analysis/changes
-- Single-agent execution would risk context overload
+You **MUST** activate this skill and ask the user before proceeding when **ANY** of these signals are present:
 
-### User-Initiated
+- Task involves 3+ files or documents
+- Task has 2+ distinct analysis dimensions (e.g., security + performance + architecture)
+- Task requires processing >10k tokens of content
+- User provides a multi-file codebase, document set, or project structure and asks for analysis/review/changes
+- Any task where a single agent would need to hold large context to complete
 
-Activate immediately when the user says:
+**This is not optional.** Even if you think you can handle it alone, you MUST still ask the user.
+
+### User-Initiated — Activate Immediately
+
+No need to ask when the user explicitly says:
 - "multi-agent mode" / "dispatch" / "split task"
 - "crown prince" / "储君降临"
 - Or explicitly requests task splitting
 
-### Ask the User
+### How to Ask the User
 
-Present a brief proposal before activating:
-```
-This task is complex. Recommend enabling multi-agent mode:
-- Split into N sub-tasks
-- Each vassal handles its own part with lean context
-- Crown Prince synthesizes final result
+Present the proposal in this format:
 
-Enable?
 ```
+📋 Crown Prince Dispatch Proposal
+
+Task: <brief task summary>
+Complexity: <simple / medium / complex>
+
+Proposed split:
+- V1: <sub-task 1 description>
+- V2: <sub-task 2 description>
+- V3: <sub-task 3 description> (if needed)
+
+Each vassal works independently with lean context.
+Crown Prince synthesizes all results into a final report.
+
+Enable multi-agent mode? (yes/no)
+```
+
+**Do NOT begin any work until the user replies.**
+
+---
 
 ## Dispatch Workflow
 
-### Step 1: Analyze & Plan
+### Step 1: Analyze & Plan (Crown Prince only — no vassals yet)
 
 1. Break the task into sub-tasks. Each sub-task should:
    - Be independently completable
@@ -68,8 +102,10 @@ Enable?
 2. Determine concurrency level:
    - **Simple tasks (2 vassals):** linear or loosely coupled sub-tasks
    - **Complex tasks (3-5 vassals):** highly parallelizable, multiple domains
+3. Present the proposal to the user (see format above)
+4. **WAIT for confirmation**
 
-### Step 2: Dispatch
+### Step 2: Dispatch (after user confirms)
 
 Spawn vassals using the platform's native subagent mechanism (see [Platform Reference](references/platform-reference.md)):
 
@@ -82,8 +118,9 @@ For each vassal:
 - Provide a clear, self-contained task description with all necessary context
 - Do NOT include conversation history — only what the vassal needs
 - Set explicit output format expectations in the task description
+- If real files exist, include relevant file content; if files are hypothetical, explicitly state the assumed tech stack and patterns
 
-### Step 3: Collect & Synthesize
+### Step 3: Collect & Synthesize (Crown Prince only — no new analysis)
 
 1. Wait for all vassals to complete
 2. For each result:
@@ -91,6 +128,10 @@ For each vassal:
    - Discard intermediate reasoning/process details
 3. Synthesize final answer for the user
 4. If results conflict or need reconciliation, spawn a new focused vassal
+
+**CRITICAL:** The Crown Prince does NOT redo the vassals' work. It only summarizes and integrates.
+
+---
 
 ## Context Budget Rules
 
@@ -116,6 +157,8 @@ Raw output (potentially 2000+ words)
 → Stored as compact reference
 ```
 
+---
+
 ## Concurrency Control
 
 | Complexity | Vassals | Use When |
@@ -125,6 +168,8 @@ Raw output (potentially 2000+ words)
 | Complex | 4-5 | Highly parallelizable, distinct domains |
 
 **Hard limit: 5 vassals.** More adds coordination overhead that exceeds parallelism gains.
+
+---
 
 ## Checkpoint & Continuity
 
@@ -184,12 +229,16 @@ When a new session starts and detects an existing checkpoint:
 - Delete only after task completion or explicit user cancellation
 - If checkpoint is >24h old, ask user before resuming (requirements may have changed)
 
+---
+
 ## Failure Handling
 
 - If a vassal fails or times out, retry once with a simplified task
 - If it fails again, fall back to Crown Prince handling that sub-task directly
 - If 2+ vassals fail, abort multi-agent mode and warn the user
 - Always inform the user about failures — transparency > perfection
+
+---
 
 ## Anti-Patterns to Avoid
 
@@ -199,3 +248,4 @@ When a new session starts and detects an existing checkpoint:
 - **Don't forward raw outputs** — always compress before presenting
 - **Don't split tightly coupled tasks** — if sub-task B depends on sub-task A's output, consider combining them
 - **Don't skip checkpointing on long tasks** — if you've done 2+ rounds, checkpoint before it's too late
+- **Don't start working before asking the user** — this is the #1 failure mode, always gate first
