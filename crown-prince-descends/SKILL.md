@@ -10,7 +10,7 @@ license: MIT
 compatibility: Works with Claude Code, OpenAI Codex, Cursor, OpenClaw, and any agent supporting
   the Agent Skills specification (agentskills.io). Subagent dispatch mechanism varies by platform.
 metadata:
-  version: "2.2.1"
+  version: "3.1.0"
   author: JKSD-tyf
   category: orchestration
 ---
@@ -39,6 +39,62 @@ Activate **immediately** (no confirmation needed) when the user says any of:
 - If the user DOES say a summon word → activate immediately, present the dispatch proposal, and wait for task confirmation
 - **Do NOT** auto-detect complexity and suggest this mode — the user knows when they need it
 - **Do NOT** mention this skill's existence unless the user asks about it
+
+---
+
+## Engine
+
+The `scripts/crown-prince-engine.sh` script is the **single source of truth** for state management and phase gates. The LLM cannot bypass these gates — only this script controls transitions.
+
+### Engine Commands
+
+| Command | Usage | Description |
+|---|---|---|
+| `init` | `engine init <id> [desc]` | Initialize a new task |
+| `status` | `engine status [id]` | Show task status or list all tasks |
+| `dispatch` | `engine dispatch <id> <vid> <task> [type]` | Register a vassal (`read-only` or `write-capable`) |
+| `collect` | `engine collect <id> <vid> [files...]` | Register vassal's output files |
+| `verify` | `engine verify <id>` | Check all vassal outputs exist |
+| `pass-gate` | `engine pass-gate <id> <phase>` | Advance to next phase (hard gate check) |
+| `retro` | `engine retro <id>` | Generate retro document |
+| `abort` | `engine abort <id>` | Reset to git baseline, clean untracked files |
+| `complete` | `engine complete <id>` | Mark task done (auto-retro from `reviewing`) |
+| `config` | `engine config [read\|write <k> <v>]` | Read/write config |
+| `version` | `engine version` | Print version |
+
+### Phase Flow
+
+```
+init → planning → dispatching → collecting → synthesizing → reviewing → retro → done
+                                                                                      ↑
+                                                                       complete from reviewing
+                                                                       triggers auto-retro
+```
+
+**Hard gates** (engine enforces, LLM cannot bypass):
+- **collecting**: requires ≥1 vassal dispatched
+- **synthesizing**: requires all vassals completed
+- **No backward transitions**: `planning → init` is blocked
+- **No phase skipping**: `planning → collecting` is blocked
+- **No operations after `done` or `aborted`**
+
+### Engine Rules for Crown Prince
+
+1. **Always run engine commands** — do NOT manually edit `.crown-prince/*/state.json`
+2. **Reference the engine** — use `scripts/crown-prince-engine.sh` (or the absolute path if known)
+3. **Read status** — before any action, run `engine status <id>` to know the current phase
+4. **Gate errors are final** — if `pass-gate` fails with `PHASE_BLOCKED` or `GATE_BLOCKED`, do NOT retry blindly. Investigate why.
+
+### Engine in SKILL_DIR
+
+```
+crown-prince-descends/
+├── SKILL.md
+├── scripts/
+│   └── crown-prince-engine.sh    ← state machine (the Engine)
+└── references/
+    └── platform-reference.md
+```
 
 ---
 
@@ -121,6 +177,20 @@ If the task **cannot** be split into non-overlapping file scopes:
 
 ## Dispatch Workflow
 
+### Step 0: Initialize (engine required)
+
+When the user confirms the task, the Crown Prince MUST initialize via engine:
+
+```bash
+bash scripts/crown-prince-engine.sh init <task-id> "<task description>"
+```
+
+Then advance to planning:
+
+```bash
+bash scripts/crown-prince-engine.sh pass-gate <task-id> planning
+```
+
 ### Step 1: Analyze & Plan (Crown Prince only — no vassals yet)
 
 1. **Determine task type** (read-only vs write-capable)
@@ -137,6 +207,19 @@ If the task **cannot** be split into non-overlapping file scopes:
 6. **WAIT for user confirmation**
 
 ### Step 2: Dispatch (after user confirms)
+
+First, advance the engine gate:
+
+```bash
+bash scripts/crown-prince-engine.sh pass-gate <task-id> dispatching
+```
+
+Then register each vassal with the engine AND spawn them:
+
+```bash
+bash scripts/crown-prince-engine.sh dispatch <task-id> V1 "<task description>" read-only
+bash scripts/crown-prince-engine.sh dispatch <task-id> V2 "<task description>" write-capable
+```
 
 Spawn vassals using the platform's native subagent mechanism (see [Platform Reference](references/platform-reference.md)):
 
@@ -188,25 +271,104 @@ After creating all files, write a brief completion note to .crown-prince-vassal-
 
 **Do NOT use TaskOutput as the primary collection method** — it returns raw JSONL transcripts on Claude Code, defeating context isolation. Use TaskOutput only as a fallback (see Failure Handling).
 
-### Step 3: Collect & Synthesize (Crown Prince only — no new analysis)
+### Step 3: Collect (engine required)
 
-1. Wait for all vassals to complete (check status, do not poll in a loop)
-2. **For read-only tasks:** Read `.crown-prince-vassal-{N}.md` summary files
-3. **For write-capable tasks:**
+After all vassals report completion, advance the gate and register their outputs:
+
+```bash
+bash scripts/crown-prince-engine.sh pass-gate <task-id> collecting
+```
+
+For each vassal, register their output files:
+
+```bash
+# Read-only vassal (summary file)
+bash scripts/crown-prince-engine.sh collect <task-id> V1 .crown-prince-vassal-1.md
+
+# Write-capable vassal (created code files)
+bash scripts/crown-prince-engine.sh collect <task-id> V2 src/auth/controller.js src/auth/routes.js
+```
+
+Then verify all outputs:
+
+```bash
+bash scripts/crown-prince-engine.sh verify <task-id>
+```
+
+If `VERIFY_FAILED`, investigate which vassals failed and retry or fall back (see Failure Handling).
+
+### Step 4: Synthesize (Crown Prince only — no new analysis)
+
+Advance the gate:
+
+```bash
+bash scripts/crown-prince-engine.sh pass-gate <task-id> synthesizing
+```
+
+Then:
+1. **For read-only tasks:** Read `.crown-prince-vassal-{N}.md` summary files
+2. **For write-capable tasks:**
    - Verify that expected files were created (glob/ls the target directories)
    - Read `.crown-prince-vassal-{N}.md` for dependency and integration notes
    - If expected files exist → vassal succeeded, proceed to integration
    - If expected files are missing → see Failure Handling
-4. For read-only: extract key conclusions, discard intermediate reasoning
-5. For write-capable: handle shared integration (mount routes, update imports, install deps)
-6. Clean up: delete all `.crown-prince-vassal-*.md` files after synthesis
-7. If results conflict or need reconciliation, spawn a new focused vassal
+3. For read-only: extract key conclusions, discard intermediate reasoning
+4. For write-capable: handle shared integration (mount routes, update imports, install deps)
+5. Clean up: delete all `.crown-prince-vassal-*.md` files after synthesis
+6. If results conflict or need reconciliation, spawn a new focused vassal
 
 **CRITICAL: The Crown Prince does NOT redo the vassals' work. It only summarizes and integrates.**
 
 **Do NOT assume vassal failure just because .crown-prince-vassal-*.md is missing** — for write-capable tasks, check if the actual code files were created. If they were, the vassal succeeded even without a summary note.
 
-**Do NOT resume or re-launch completed vassals** — verify file existence first.
+### Step 5: Review & Complete (engine required)
+
+If the task benefits from a review pass:
+
+```bash
+bash scripts/crown-prince-engine.sh pass-gate <task-id> reviewing
+```
+
+Review the synthesis output, then complete:
+
+```bash
+bash scripts/crown-prince-engine.sh complete <task-id>
+```
+
+**Note:** `complete` from `reviewing` auto-triggers retro. `complete` from `synthesizing` skips directly to `done`.
+
+### Step 6: Retro (optional, automatic from reviewing)
+
+If the task went through `reviewing`, `complete` auto-advances to `retro` phase. Generate the retro document:
+
+```bash
+bash scripts/crown-prince-engine.sh retro <task-id>
+```
+
+This creates `.crown-prince/retro/<date>-<task-id>.md` with a template for:
+- Issues encountered
+- Lessons learned
+- Improvement proposals
+
+Complete the retro:
+
+```bash
+bash scripts/crown-prince-engine.sh complete <task-id>
+```
+
+---
+
+## Checkpoint & Continuity
+
+The engine automatically persists state to `.crown-prince/<task-id>/state.json`. A fresh session can resume by reading the engine status.
+
+### Session Handoff
+
+When a new session starts and the user summons the Crown Prince:
+1. Run `engine status` to check for existing tasks
+2. If an unfinished task exists, brief the user: "Detected an unfinished Crown Prince task: `<id>` at phase `<phase>`. Resume?"
+3. If yes, resume from the current phase — do NOT replay old conversation
+4. If the task is >24h old, ask user before resuming (requirements may have changed)
 
 ---
 
@@ -248,71 +410,11 @@ Raw output (potentially 2000+ words)
 
 ---
 
-## Checkpoint & Continuity
-
-The Crown Prince's context grows during long sessions. Persist state to disk so a fresh session can continue without losing progress.
-
-### When to Checkpoint
-
-After every dispatch round (all vassals returned + synthesis done), write a checkpoint:
-
-**Path:** `.crown-prince-checkpoint.md` (project root) or platform equivalent
-
-```markdown
-# Crown Prince Checkpoint
-
-- **Task:** <original task description, 1-2 sentences>
-- **Status:** in_progress | completed | blocked
-- **Round:** <N>
-- **Timestamp:** <ISO 8601>
-
-## Dispatch History
-| Round | Vassal | Sub-task | Status | Key Result (≤50 words) |
-|-------|--------|----------|--------|------------------------|
-| 1     | V1     | ...      | done   | ...                    |
-
-## Remaining Work
-- [ ] <next sub-task or pending item>
-
-## Synthesis So Far
-<Brief accumulated conclusions, ≤200 words>
-
-## Notes
-<Any context the next session needs to know>
-```
-
-### Context Budget Alert
-
-If the conversation has accumulated 3+ dispatch rounds or multiple long vassal outputs:
-
-```
-Crown Prince context approaching safe limits. Progress saved to checkpoint.
-Recommend starting a new session — the next session will auto-detect and resume.
-```
-
-### Session Handoff
-
-When a new session starts and detects an existing checkpoint:
-1. Read the checkpoint
-2. Brief the user: "Detected an unfinished Crown Prince task. Resume?"
-3. If yes, resume from the checkpoint — do NOT replay old conversation
-4. Update the checkpoint after each new round
-5. On task completion, delete the checkpoint
-
-### Checkpoint Rules
-
-- Keep under 500 words — lean enough to safely load into a fresh session
-- One active checkpoint at a time — overwrite, never append
-- Delete only after task completion or explicit user cancellation
-- If checkpoint is >24h old, ask user before resuming (requirements may have changed)
-
----
-
 ## Failure Handling
 
 - If a vassal fails or times out, retry once with a simplified task
 - If it fails again, fall back to Crown Prince handling that sub-task directly
-- If 2+ vassals fail, abort multi-agent mode and warn the user
+- If 2+ vassals fail, abort via engine: `bash scripts/crown-prince-engine.sh abort <task-id>`
 - Always inform the user about failures — transparency > perfection
 
 ### Vassal "No Output" Troubleshooting
@@ -324,6 +426,13 @@ If `.crown-prince-vassal-{N}.md` is missing after a vassal reports completion:
 3. **Still nothing?** → Retry once with an explicit "you MUST write to .crown-prince-vassal-{N}.md" instruction.
 4. **Still nothing after retry?** → Vassal genuinely failed. Fall back to Crown Prince handling.
 
+### Abort Safety
+
+The `abort` command resets the git repo to the baseline commit and removes all untracked files:
+- All vassal output is discarded
+- All new files created since `init` are deleted
+- `.crown-prince/<task-id>/state.json` is preserved (phase set to `aborted`) for review
+
 ---
 
 ## Anti-Patterns to Avoid
@@ -334,5 +443,5 @@ If `.crown-prince-vassal-{N}.md` is missing after a vassal reports completion:
 - **Don't give vassals full conversation history** — they don't need it
 - **Don't spawn vassals for vassals** — max 1 level of dispatch depth
 - **Don't forward raw outputs** — always compress before presenting
-- **Don't skip checkpointing on long tasks** — if you've done 2+ rounds, checkpoint before it's too late
+- **Don't manually edit state.json** — always use engine commands
 - **Don't mention this skill unprompted** — the user will summon when needed
