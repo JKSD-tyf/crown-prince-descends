@@ -114,6 +114,67 @@ Raw output (potentially 2000+ words)
 - If 2+ vassals fail, abort multi-agent mode and warn the user
 - Always inform the user about failures — transparency > perfection
 
+## Checkpoint & Continuity
+
+The Crown Prince's context will grow during a long dispatch session. When it approaches the safe limit, persist state to disk so a fresh session can continue without losing progress.
+
+### When to Checkpoint
+
+After every dispatch round (all vassals returned + synthesis done), write a checkpoint file to `memory/crown-prince-checkpoint.md`:
+
+```markdown
+# Crown Prince Checkpoint
+
+- **Task:** <original task description, 1-2 sentences>
+- **Status:** in_progress | completed | blocked
+- **Round:** <N>
+- **Timestamp:** <ISO 8601>
+
+## Dispatch History
+| Round | Vassal | Sub-task | Status | Key Result (≤50 words) |
+|-------|--------|----------|--------|------------------------|
+| 1     | V1     | ...      | done   | ...                    |
+
+## Remaining Work
+- [ ] <next sub-task or pending item>
+
+## Synthesis So Far
+<Brief accumulated conclusions, ≤200 words>
+
+## Notes
+<Any context the next session needs to know>
+```
+
+### Context Budget Alert
+
+Monitor context growth informally. If the conversation has accumulated:
+- 3+ dispatch rounds, OR
+- Multiple long vassal outputs that couldn't be fully compressed
+
+Then after the current round, inform the user:
+
+```
+储君的精力快用完了（上下文接近安全上限）。
+当前进度已保存到 checkpoint。
+建议新开一个 session，我会自动读取 checkpoint 继续工作。
+```
+
+### Session Handoff
+
+When a new session starts and detects an existing checkpoint (`memory/crown-prince-checkpoint.md`):
+1. Read the checkpoint
+2. Brief the user: "检测到未完成的储君任务，是否继续？"
+3. If yes, resume from where it left off using the checkpoint state — do NOT replay old conversation
+4. Update the checkpoint after each new round
+5. On task completion, delete the checkpoint file
+
+### Checkpoint Rules
+
+- Keep it under 500 words — it must be lean enough to safely load into a fresh session
+- One active checkpoint at a time — overwrite, never append
+- Delete checkpoint only after task completion or explicit user cancellation
+- If checkpoint is >24h old, ask user before resuming (requirements may have changed)
+
 ## Anti-Patterns to Avoid
 
 - **Don't dispatch trivial tasks** — if a task takes <2 minutes single-agent, just do it
@@ -121,3 +182,4 @@ Raw output (potentially 2000+ words)
 - **Don't spawn vassals for vassals** — max 1 level of dispatch depth
 - **Don't forward raw outputs** — always compress before presenting
 - **Don't split tightly coupled tasks** — if sub-task B depends on sub-task A's output, consider combining them
+- **Don't skip checkpointing on long tasks** — if you've done 2+ rounds, checkpoint before it's too late
