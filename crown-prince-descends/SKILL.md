@@ -1,19 +1,16 @@
 ---
 name: crown-prince-descends
 description: >
-  Multi-agent task dispatcher that prevents context overload by splitting complex tasks across
-  isolated subagents. The Crown Prince (main agent) analyzes, plans, dispatches vassals, and
-  synthesizes results — never doing heavy lifting itself. Each vassal gets minimal, relevant
-  context to stay sharp. Essential for models with large but unreliable context windows (e.g.,
-  GLM-5.1, long-context LLMs). Triggers on: (1) tasks involving multiple large files or
-  documents (>5 files or >50k tokens), (2) tasks with 3+ independent sub-steps, (3) user
-  explicitly requests "multi-agent", "dispatch", "crown prince", "储君降临", or (4) any task
-  where single-agent execution risks context overload.
+  Multi-agent task dispatcher invoked ONLY by user command. Prevents context overload by
+  splitting complex tasks across isolated subagents. The Crown Prince (main agent) analyzes,
+  plans, dispatches vassals, and synthesizes results — never doing heavy lifting itself.
+  Activation: user MUST say "储君降临" or "crown prince descends" (or close variants).
+  Does NOT auto-activate on complex tasks — this is intentional to avoid slowing down simple work.
 license: MIT
 compatibility: Works with Claude Code, OpenAI Codex, Cursor, OpenClaw, and any agent supporting
   the Agent Skills specification (agentskills.io). Subagent dispatch mechanism varies by platform.
 metadata:
-  version: "1.2.1"
+  version: "2.0.0"
   author: JKSD-tyf
   category: orchestration
 ---
@@ -24,18 +21,24 @@ Multi-agent dispatch pattern. The Crown Prince commands; the Vassals execute. Ev
 
 ---
 
-## ⚠️ MANDATORY DECISION GATE — READ FIRST
+## 🔑 Activation — Summon Only
 
-**This is the most important rule in this skill. Violation of this rule is the #1 failure mode.**
+This skill is **NEVER auto-activated**. It only activates when the user explicitly summons it.
 
-Before starting ANY work on a task that matches the complexity signals below, you MUST:
+### Summon Words
 
-1. **STOP** — do not read files, do not analyze, do not implement, do not begin any work
-2. **Present a dispatch proposal** to the user (show how you would split the task)
-3. **WAIT** for explicit user confirmation ("yes", "enable", "go ahead", etc.)
-4. **ONLY THEN** proceed with dispatch
+Activate **immediately** (no confirmation needed) when the user says any of:
+- `储君降临`
+- `crown prince descends`
+- `crown prince`
+- Or a clear intent to invoke multi-agent mode (e.g., "用多Agent模式", "dispatch mode", "召唤储君")
 
-If you catch yourself working on a complex sub-task directly, **STOP immediately** and re-route it to a vassal. The Crown Prince plans and synthesizes — it never executes.
+### What This Means
+
+- If the user does NOT say a summon word → **ignore this skill entirely**, work normally
+- If the user DOES say a summon word → activate immediately, present the dispatch proposal, and wait for task confirmation
+- **Do NOT** auto-detect complexity and suggest this mode — the user knows when they need it
+- **Do NOT** mention this skill's existence unless the user asks about it
 
 ---
 
@@ -44,31 +47,22 @@ If you catch yourself working on a complex sub-task directly, **STOP immediately
 - **Crown Prince (Main Agent)** — Sovereign commander. Analyzes, plans, dispatches vassals, synthesizes results. **Never does heavy lifting.**
 - **Vassals (Subagents)** — Executors. Each handles a focused sub-task with minimal, relevant context. They serve the Crown Prince.
 - **Context budget > big context window** — A well-curated 100k context consistently outperforms a noisy 200k one.
+- **On-demand > always-on** — Only summon the Crown Prince when the task genuinely benefits from parallel dispatch.
 
-## When to Activate
+---
 
-### Automatic Detection — MANDATORY
+## Dispatch Workflow
 
-You **MUST** activate this skill and ask the user before proceeding when **ANY** of these signals are present:
+### Step 1: Analyze & Plan (Crown Prince only — no vassals yet)
 
-- Task involves 3+ files or documents
-- Task has 2+ distinct analysis dimensions (e.g., security + performance + architecture)
-- Task requires processing >10k tokens of content
-- User provides a multi-file codebase, document set, or project structure and asks for analysis/review/changes
-- Any task where a single agent would need to hold large context to complete
-
-**This is not optional.** Even if you think you can handle it alone, you MUST still ask the user.
-
-### User-Initiated — Activate Immediately
-
-No need to ask when the user explicitly says:
-- "multi-agent mode" / "dispatch" / "split task"
-- "crown prince" / "储君降临"
-- Or explicitly requests task splitting
-
-### How to Ask the User
-
-Present the proposal in this format:
+1. Break the task into sub-tasks. Each sub-task should:
+   - Be independently completable
+   - Require its own bounded set of files/context
+   - Have a clear, concise output format
+2. Determine concurrency level:
+   - **Simple tasks (2 vassals):** linear or loosely coupled sub-tasks
+   - **Complex tasks (3-5 vassals):** highly parallelizable, multiple domains
+3. Present the proposal to the user:
 
 ```
 📋 Crown Prince Dispatch Proposal
@@ -84,32 +78,16 @@ Proposed split:
 Each vassal works independently with lean context.
 Crown Prince synthesizes all results into a final report.
 
-Enable multi-agent mode? (yes/no)
+Enable? (yes/no)
 ```
 
-**Do NOT begin any work until the user replies.**
-
----
-
-## Dispatch Workflow
-
-### Step 1: Analyze & Plan (Crown Prince only — no vassals yet)
-
-1. Break the task into sub-tasks. Each sub-task should:
-   - Be independently completable
-   - Require its own bounded set of files/context
-   - Have a clear, concise output format
-2. Determine concurrency level:
-   - **Simple tasks (2 vassals):** linear or loosely coupled sub-tasks
-   - **Complex tasks (3-5 vassals):** highly parallelizable, multiple domains
-3. Present the proposal to the user (see format above)
-4. **WAIT for confirmation**
+4. **WAIT for user confirmation**
 
 ### Step 2: Dispatch (after user confirms)
 
 Spawn vassals using the platform's native subagent mechanism (see [Platform Reference](references/platform-reference.md)):
 
-- **Claude Code:** Use the `Agent` tool or `--agent` flag with a custom subagent definition
+- **Claude Code:** Use the `Task` tool with `run_in_background: true`
 - **OpenAI Codex:** Use `mode: subagents` or custom TOML agent in `~/.codex/agents/`
 - **Cursor:** Define subagents in `.cursor/rules/` or use background agent delegation
 - **OpenClaw:** Use `sessions_spawn` with `runtime: "subagent"`
@@ -122,7 +100,7 @@ For each vassal:
 
 **IMPORTANT — Vassal Output Contract (ALL platforms):**
 
-Instruct every vassal to write its final result to a designated output file instead of relying on return values. This avoids the TaskOutput JSONL bug in Claude Code and ensures clean result collection on all platforms.
+Instruct every vassal to write its final result to a designated output file. This avoids the TaskOutput JSONL bug in Claude Code and ensures clean result collection on all platforms.
 
 Vassal task description MUST include:
 ```
@@ -264,10 +242,10 @@ When a new session starts and detects an existing checkpoint:
 
 ## Anti-Patterns to Avoid
 
-- **Don't dispatch trivial tasks** — if a task takes <2 minutes single-agent, just do it
+- **Don't auto-activate** — this skill ONLY activates on explicit user summon
 - **Don't give vassals full conversation history** — they don't need it
 - **Don't spawn vassals for vassals** — max 1 level of dispatch depth
 - **Don't forward raw outputs** — always compress before presenting
 - **Don't split tightly coupled tasks** — if sub-task B depends on sub-task A's output, consider combining them
 - **Don't skip checkpointing on long tasks** — if you've done 2+ rounds, checkpoint before it's too late
-- **Don't start working before asking the user** — this is the #1 failure mode, always gate first
+- **Don't mention this skill unprompted** — the user will summon when needed
