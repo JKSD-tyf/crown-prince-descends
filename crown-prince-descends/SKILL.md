@@ -224,10 +224,36 @@ bash scripts/crown-prince-engine.sh dispatch <task-id> V2 "<task description>" w
 Spawn vassals using the platform's native subagent mechanism (see [Platform Reference](references/platform-reference.md)):
 
 - **Claude Code (read-only):** Use the `Task` tool with `run_in_background: true`
-- **Claude Code (write-capable):** Use `Agent` tool with custom subagent + `bypassPermissions` (see platform-reference.md)
+- **Claude Code (write-capable):** MUST use the `Agent` tool with a custom subagent (NOT the `Task` tool). See Claude Code Write-Capable Dispatch below.
 - **OpenAI Codex:** Use `mode: subagents` or custom TOML agent in `~/.codex/agents/`
 - **Cursor:** Define subagents in `.cursor/rules/` or use background agent delegation
 - **OpenClaw:** Use `sessions_spawn` with `runtime: "subagent"`
+
+### Claude Code Write-Capable Dispatch (REQUIRED)
+
+**Background Task agents CANNOT write files** (Claude Code bug). For write-capable vassals on Claude Code, the Crown Prince MUST:
+
+1. **Before dispatching**, create a vassal subagent definition in `.claude/agents/vassal-code.md`:
+
+```markdown
+---
+description: Vassal agent for code generation tasks. Spawned by Crown Prince.
+tools: Read Write Edit Bash Glob Grep
+maxTurns: 30
+permissionMode: bypassPermissions
+---
+You are a vassal agent in the Crown Prince multi-agent system. Complete the assigned task precisely.
+Write all specified output files. Follow the output contract exactly.
+```
+
+2. **Spawn each write-capable vassal** using the `Agent` tool:
+```
+Agent(agent_type: "vassal-code", task: "<vassal prompt with output contract>")
+```
+
+3. **Do NOT** use `Task(run_in_background: true)` for write-capable tasks — the background agent will silently fail to write files.
+
+**⚠️ Security:** `bypassPermissions` skips all permission checks. Only use in trusted project directories.
 
 For each vassal:
 - Provide a clear, self-contained task description with all necessary context
